@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Sokoban
+Name[ru]=Сокобан
+Exec=%U Sokoban
+Icon=assets/icon.svg
+X-Lomiri-Splash-Image=assets/splash.svg
+X-Lomiri-Departament-ID=games
+Keywords=sokoban;game;player;box;
+Terminal=false
+Type=Application
+X-Lomiri-Touch=true
+X-Lomiri-Splash-Color=#008800

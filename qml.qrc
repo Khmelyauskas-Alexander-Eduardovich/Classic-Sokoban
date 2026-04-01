@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/">
+        <file>qml/main.qml</file>
+        <file>qml/levels.js</file>
+        <file>qml/box.svg</file>
+        <file>qml/box_on_goal.svg</file>
+        <file>qml/floor.svg</file>
+        <file>qml/goal.svg</file>
+        <file>qml/wall.svg</file>
+        <file>qml/player.svg</file>
+    </qresource>
+</RCC>

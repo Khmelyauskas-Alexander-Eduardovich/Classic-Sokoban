@@ -1,0 +1,15 @@
+{
+    "name": "sokoban-classic.jwb-bravada",
+    "description": "Classic Sokoban game from My childhood xD",
+    "architecture": "@CLICK_ARCH@",
+    "title": "Sokoban",
+    "hooks": {
+        "sokoban-classic": {
+            "apparmor": "sokoban-classic.apparmor",
+            "desktop":  "sokoban-classic.desktop"
+        }
+    },
+    "version": "1.1.0",
+    "maintainer": "Khmelyauskas Alexander Eduardovich <mardimusa8@gmail.com>",
+    "framework" : "@CLICK_FRAMEWORK@"
+}
