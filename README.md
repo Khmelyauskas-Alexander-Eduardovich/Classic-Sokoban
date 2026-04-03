@@ -2,6 +2,10 @@
 
 Classic Sokoban game from My childhood xD
 
+<img width="720" height="1600" alt="screenshot20260403_231614004" src="https://github.com/user-attachments/assets/a6eca9a1-dde7-4710-80c4-61bb8660b1ae" />
+<img width="720" height="1600" alt="screenshot20260403_231601131" src="https://github.com/user-attachments/assets/8f437a29-cae4-4741-b1f7-c3e0f3ceedb5" />
+
+
 ## License
 
 Copyright (C) 2025  mardimusa8@gmail.com
