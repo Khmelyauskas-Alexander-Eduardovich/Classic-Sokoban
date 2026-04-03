@@ -1,7 +1,7 @@
 // levels.js
 // # - стена, @ - игрок, $ - ящик, . - цель, * - ящик на цели, + - игрок на цели, X - стена (X)
-
-const levels = [
+// Levels & Logics in 1 (One) ;;)
+var levels = [
     {"name": qsTr("Level 1"), "map": [
                          "  ###    ",
                          "  #.#    ",
@@ -155,30 +155,44 @@ const levels = [
 ];
 
 function tryMove(currentMap, x, y, dx, dy) {
+    // Делаем копию сразу, чтобы не портить оригинал до проверки
+    var newMap = JSON.parse(JSON.stringify(currentMap));
     var nX = x + dx;
     var nY = y + dy;
-    if (nY < 0 || nY >= currentMap.length || nX < 0 || nX >= currentMap[nY].length) return { "success": false };
-    var target = currentMap[nY][nX];
+
+    if (nY < 0 || nY >= newMap.length || nX < 0 || nX >= newMap[nY].length) return { "success": false };
+
+    var target = newMap[nY][nX];
     if (target === "#" || target === "X") return { "success": false };
-    var oldMapCopy = JSON.parse(JSON.stringify(currentMap));
+
+    // Логика ящика
     if (target === "$" || target === "*") {
         var bX = nX + dx;
         var bY = nY + dy;
-        var bTarget = currentMap[bY][bX];
+        if (bY < 0 || bY >= newMap.length || bX < 0 || bX >= newMap[bY].length) return { "success": false };
+
+        var bTarget = newMap[bY][bX];
         if (bTarget === " " || bTarget === ".") {
-            var rowTo = currentMap[bY].split("");
+            var rowTo = newMap[bY].split("");
             rowTo[bX] = (bTarget === ".") ? "*" : "$";
-            currentMap[bY] = rowTo.join("");
-            var rowFrom = currentMap[nY].split("");
+            newMap[bY] = rowTo.join("");
+
+            var rowFrom = newMap[nY].split("");
             rowFrom[nX] = (target === "*") ? "." : " ";
-            currentMap[nY] = rowFrom.join("");
+            newMap[nY] = rowFrom.join("");
         } else return { "success": false };
     }
-    var pOldRow = currentMap[y].split("");
-    pOldRow[x] = (currentMap[y][x] === "+") ? "." : " ";
-    currentMap[y] = pOldRow.join("");
-    var pNewRow = currentMap[nY].split("");
-    pNewRow[nX] = (currentMap[nY][nX] === ".") ? "+" : "@";
-    currentMap[nY] = pNewRow.join("");
-    return { "success": true, "newX": nX, "newY": nY, "oldMap": oldMapCopy, "oldX": x, "oldY": y };
+
+    // Логика игрока (обновляем target, так как он мог измениться ящиком)
+    var finalTarget = newMap[nY][nX];
+    var pOldRow = newMap[y].split("");
+    pOldRow[x] = (newMap[y][x] === "+" || newMap[y][x] === ".") ? "." : " ";
+    newMap[y] = pOldRow.join("");
+
+    var pNewRow = newMap[nY].split("");
+    pNewRow[nX] = (finalTarget === "." || finalTarget === "*") ? "+" : "@";
+    // Заметь: если там был ящик, мы его уже подвинули, поэтому тут просто ставим игрока
+    newMap[nY] = pNewRow.join("");
+
+    return { "success": true, "newX": nX, "newY": nY, "newMap": newMap };
 }

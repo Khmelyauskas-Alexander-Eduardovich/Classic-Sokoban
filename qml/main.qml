@@ -10,120 +10,125 @@ ApplicationWindow {
     height: 800
     title: qsTr("Sokoban Bravada")
     color: "#7cfc00"
+    // Свой суррогат для единиц измерения
+    readonly property int gu: (typeof units !== 'undefined') ? units.gu(1) : 8
 
-    // --- ПРОГРЕСС ---
+    // Теперь вместо units.gu(5) пишем просто 5 * gu
     property int currentLevelIdx: 0
     property int maxUnlockedLevel: 0
     readonly property int totalLevels: 15
 
-    // --- ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЛЯ АССЕТОВ ---
-    function getAsset(name) {
-        var qrcPath = "qrc:/" + name;
-        // Проверяем, доступны ли ресурсы (для бинарника), если нет — берем локально (для qmlscene)
-        return (Qt.resolvedUrl(qrcPath).toString() !== "") ? qrcPath : name;
-    }
-
-    // --- SQL STORAGE (FIXED) ---
-        QtObject {
-            id: dbManager
-            property var db: null
-
-            function initDb() {
-                try {
-                    // Открываем базу. Если версии нет, ставим "1.0"
-                    db = LocalStorage.openDatabaseSync("SokobanBravadaDB", "", "Save Progress", 100000);
-
-                    db.transaction(function(tx) {
-                        // Создаем таблицу, если её нет
-                        tx.executeSql('CREATE TABLE IF NOT EXISTS settings(key TEXT UNIQUE, value TEXT)');
-                        console.log("SQL: Table checked/created");
-                    });
-                } catch (e) {
-                    console.log("SQL Init Error: " + e);
-                }
-            }
-
-            function saveProgress() {
-                if (!db) return;
+    // --- Менеджер базы данных ---
+    QtObject {
+        id: dbManager
+        property var db: null
+        function initDb() {
+            try {
+                db = LocalStorage.openDatabaseSync("SokobanBravada", "1.0", "Save Progress", 100000);
                 db.transaction(function(tx) {
-                    // Явно приводим к String перед записью
-                    tx.executeSql('INSERT OR REPLACE INTO settings VALUES(?, ?)', ["lastIdx", String(window.currentLevelIdx)]);
-                    tx.executeSql('INSERT OR REPLACE INTO settings VALUES(?, ?)', ["maxIdx", String(window.maxUnlockedLevel)]);
-                    console.log("SQL: Saved level " + window.currentLevelIdx);
+                    tx.executeSql('CREATE TABLE IF NOT EXISTS settings(key TEXT UNIQUE, value TEXT)');
                 });
-            }
-
-            function loadProgress() {
-                if (!db) return;
-                db.readTransaction(function(tx) {
-                    try {
-                        var rs1 = tx.executeSql('SELECT value FROM settings WHERE key="lastIdx"');
-                        if (rs1.rows.length > 0) {
-                            window.currentLevelIdx = parseInt(rs1.rows.item(0).value);
-                        }
-
-                        var rs2 = tx.executeSql('SELECT value FROM settings WHERE key="maxIdx"');
-                        if (rs2.rows.length > 0) {
-                            window.maxUnlockedLevel = parseInt(rs2.rows.item(0).value);
-                        }
-                        console.log("SQL: Loaded. Current: " + window.currentLevelIdx + " Max: " + window.maxUnlockedLevel);
-                    } catch (e) {
-                        console.log("SQL Load Error: " + e);
-                    }
-                });
-            }
+            } catch (e) { console.log("SQL Error: " + e) }
         }
 
-    // --- ENGINE ---
+        function saveProgress() {
+            if (!db) return;
+            db.transaction(function(tx) {
+                tx.executeSql('INSERT OR REPLACE INTO settings VALUES(?, ?)', ["lastIdx", String(window.currentLevelIdx)]);
+                tx.executeSql('INSERT OR REPLACE INTO settings VALUES(?, ?)', ["savedMap", JSON.stringify(engine.map)]);
+                tx.executeSql('INSERT OR REPLACE INTO settings VALUES(?, ?)', ["maxIdx", String(window.maxUnlockedLevel)]);
+                tx.executeSql('INSERT OR REPLACE INTO settings VALUES(?, ?)', ["playerX", String(engine.px)]);
+                tx.executeSql('INSERT OR REPLACE INTO settings VALUES(?, ?)', ["playerY", String(engine.py)]);
+            });
+        }
+
+        function loadProgress() {
+            if (!db) return;
+            db.transaction(function(tx) {
+                var rs = tx.executeSql('SELECT key, value FROM settings');
+                var mapData = null; var pX = -1; var pY = -1;
+                for (var i = 0; i < rs.rows.length; i++) {
+                    var item = rs.rows.item(i);
+                    if (item.key === "lastIdx") window.currentLevelIdx = parseInt(item.value);
+                    if (item.key === "savedMap") mapData = JSON.parse(item.value);
+                    if (item.key === "playerX") pX = parseInt(item.value);
+                    if (item.key === "playerY") pY = parseInt(item.value);
+                    if (item.key === "maxIdx") window.maxUnlockedLevel = parseInt(item.value);
+                }
+                if (mapData && pX !== -1) {
+                    engine.map = mapData; engine.px = pX; engine.py = pY;
+                    engine.isRestored = true;
+                }
+            });
+        }
+    }
+
+    // --- Движок игры ---
     QtObject {
         id: engine
-        property var history: []; property var map: []; property int px: 0; property int py: 0
-        property bool swipeMode: false
+        property var map: []; property var history: []
+        property int px: 0; property int py: 0; property int mapW: 0
+        property bool isRestored: false; property bool swipeMode: false
+        property bool levelJustLoaded: false
 
-        function loadLevel(idx) {
+        function loadLevel(idx, forceReset = false) {
             if (idx >= Logic.levels.length) idx = 0;
+            winLabel.visible = false;
+            levelJustLoaded = true;
             window.currentLevelIdx = idx;
             if (idx > window.maxUnlockedLevel) window.maxUnlockedLevel = idx;
-            dbManager.saveProgress();
 
-            var data = Logic.levels[idx];
-            map = JSON.parse(JSON.stringify(data.map));
-            history = [];
+            if (!isRestored || forceReset) {
+                var data = Logic.levels[idx];
+                map = JSON.parse(JSON.stringify(data.map));
+            }
+
+            mapW = 0;
             for (var i = 0; i < map.length; i++) {
-                var pPos = map[i].indexOf("@");
-                if (pPos === -1) pPos = map[i].indexOf("+");
+                if (map[i].length > mapW) mapW = map[i].length;
+                var pPos = map[i].indexOf("@") === -1 ? map[i].indexOf("+") : map[i].indexOf("@");
                 if (pPos !== -1) { px = pPos; py = i; }
             }
+
+            isRestored = false; history = [];
             refresh();
+            levelJustLoaded = false;
         }
 
         function refresh() {
             gameModel.clear();
-            for (var y = 0; y < 9; y++) {
-                var row = (map[y] !== undefined) ? map[y] : "         ";
-                for (var x = 0; x < 9; x++) {
-                    gameModel.append({"type": (row[x] !== undefined) ? row[x] : " "});
+            if (!map || map.length === 0) return;
+
+            for (var y = 0; y < map.length; y++) {
+                var rowStr = map[y];
+                for (var x = 0; x < mapW; x++) {
+                    var cellType = (x < rowStr.length) ? rowStr.charAt(x) : " ";
+                    gameModel.append({"type": cellType});
                 }
             }
-            winLabel.visible = isWin();
+
+            if (levelJustLoaded) {
+                flick.contentX = (flick.contentWidth > flick.width) ? (flick.contentWidth - flick.width) / 2 : 0;
+                flick.contentY = (flick.contentHeight > flick.height) ? (flick.contentHeight - flick.height) / 2 : 0;
+            }
+
+            winLabel.visible = !levelJustLoaded && isWin();
             if (winLabel.visible) autoNextTimer.start();
         }
 
         function isWin() {
             if (map.length === 0) return false;
-            for (var i = 0; i < map.length; i++) {
-                if (map[i].indexOf("$") !== -1) return false;
-            }
+            for (var i = 0; i < map.length; i++) if (map[i].indexOf("$") !== -1) return false;
             return true;
         }
 
         function step(dx, dy) {
             if (winLabel.visible) return;
             var res = Logic.tryMove(map, px, py, dx, dy);
-            if (res.success === true) {
-                history.push({"m": res.oldMap, "x": res.oldX, "y": res.oldY});
-                px = res.newX; py = res.newY;
-                refresh();
+            if (res && res.success) {
+                history.push({ "m": JSON.parse(JSON.stringify(map)), "x": px, "y": py });
+                map = res.newMap; px = res.newX; py = res.newY;
+                refresh(); dbManager.saveProgress();
             }
         }
 
@@ -131,103 +136,86 @@ ApplicationWindow {
             if (history.length > 0 && !winLabel.visible) {
                 var prev = history.pop();
                 map = prev.m; px = prev.x; py = prev.y;
-                refresh();
+                refresh(); dbManager.saveProgress();
             }
         }
     }
 
-    Timer { id: autoNextTimer; interval: 1500; onTriggered: engine.loadLevel(window.currentLevelIdx + 1) }
+    Timer { id: autoNextTimer; interval: 1500; onTriggered: engine.loadLevel(window.currentLevelIdx + 1, true) }
     ListModel { id: gameModel }
 
     Column {
         anchors.fill: parent; anchors.margins: 10; spacing: 15
 
         Text {
-            text: Logic.levels[window.currentLevelIdx].name
+            text: qsTr("Level") + " " + (window.currentLevelIdx + 1)
             font.pixelSize: 24; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter
         }
 
         Row {
             anchors.horizontalCenter: parent.horizontalCenter; spacing: 15
-            Button { text: qsTr("↶ Назад"); onClicked: engine.back() }
-            Button { text: qsTr("СБРОС"); onClicked: engine.loadLevel(window.currentLevelIdx) }
+            Button { text: qsTr("Back"); onClicked: engine.back() }
             Button {
-                id: btnChoose
-                text: qsTr("CHOOSE LEVEL")
-                visible: window.maxUnlockedLevel >= 14
-                onClicked: console.log("Menu open")
+                text: qsTr("Reset") // Тут двоеточие, это свойство
+                onClicked: { // А это сигнал, код пишем в фигурных скобках
+                    engine.loadLevel(window.currentLevelIdx, true);
+                    flick.contentX = 0;
+                    flick.contentY = 0;
+                    //gameContainer.scale = 1.0;
+                }
+            }
+            Button {
+                text: qsTr("SELECT")
+                visible: window.maxUnlockedLevel > 0
+                onClicked: levelPicker.open()
             }
         }
 
-        // --- ОБЛАСТЬ С ПЛАВНЫМ ЗУМОМ И СВАЙПОМ ---
-        Flickable {
-            id: flick
-            width: parent.width; height: 400
-            contentWidth: gameContainer.width * gameContainer.scale
-            contentHeight: gameContainer.height * gameContainer.scale
-            clip: true
-            boundsBehavior: Flickable.StopAtBounds
-            interactive: true
+        Item {
+            id: flickViewport
+            width: parent.width; height: 420; clip: true
 
-            // Настройка плавности свайпа (инерции)
-            flickDeceleration: 1500 // Чем меньше, тем дольше "катится" карта
-            maximumFlickVelocity: 2500 // Максимальная скорость "броска"
-
-            // Улучшенная эмуляция зума для трекпада (безумный MouseWheel)
-            MouseArea {
+            Flickable {
+                id: flick
                 anchors.fill: parent
-                propagateComposedEvents: true
-                onWheel: {
-                    // Используем Behavior для сглаживания зума
-                    var zoomFactor = wheel.angleDelta.y > 0 ? 1.2 : 0.8
-                    gameContainer.smoothScaleTo(zoomFactor);
-                }
-                onClicked: mouse.accepted = false
-            }
+                contentWidth: gameContainer.width * gameContainer.scale
+                contentHeight: gameContainer.height * gameContainer.scale
 
-            PinchArea {
-                id: pinchArea
-                anchors.fill: parent
-                pinch.target: gameContainer
-                pinch.minimumScale: 0.5
-                pinch.maximumScale: 3.0
-                pinch.dragAxis: Pinch.NoDrag
+                // Магия для UT: заставляем его быть максимально отзывчивым
+                boundsBehavior: Flickable.StopAtBounds
+                pressDelay: 0
+                interactive: true
 
                 Item {
                     id: gameContainer
-                    width: 40 * 9; height: 40 * 9
-                    anchors.centerIn: parent
-                    transformOrigin: Item.Center
+                    width: Math.max(40, engine.mapW * 40)
+                    height: Math.max(40, (engine.map ? engine.map.length : 0) * 40)
 
-                    // Функция для плавного изменения масштаба через MouseArea
-                    function smoothScaleTo(factor) {
-                        var ns = scale * factor
-                        if (ns >= 0.5 && ns <= 3.0) scale = ns
-                    }
 
-                    // --- BEHAVIOR ДЛЯ ПЛАВНОГО ЗУМА ---
-                    // Отключаем анимацию, когда активна PinchArea (щипок на экране телефона),
-                    // чтобы не было дрожания. Анимация работает только для MouseWheel.
-                    Behavior on scale {
-                        id: scaleAnimation
-                        enabled: !pinchArea.pinch.active // Магия выключения анимации
-                        NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
-                    }
+                    // ФИКС ЦЕНТРИРОВАНИЯ:
+                        // Мы центрируем только если контент МЕНЬШЕ видимой области.
+                        // В остальных случаях отдаем управление Flickable (x=0, y=0)
+                        x: (flick.contentWidth < flick.width) ? (flick.width - flick.contentWidth) / 2 : 0
+                        y: (flick.contentHeight < flick.height) ? (flick.height - flick.contentHeight) / 2 : 0
+
+                        transformOrigin: Item.TopLeft
 
                     GridView {
-                        anchors.fill: parent; cellWidth: 40; cellHeight: 40
+                        id: gameGrid; anchors.fill: parent; cellWidth: 40; cellHeight: 40
                         model: gameModel; interactive: false
+
                         delegate: Item {
                             width: 40; height: 40
                             Image { anchors.fill: parent; source: "floor.svg"; opacity: 0.1 }
                             Image {
-                                anchors.fill: parent
+                                anchors.fill: parent; smooth: false
                                 source: {
-                                    if (model.type === "#" || model.type === "X") return "wall.svg";
-                                    if (model.type === "@" || model.type === "+") return "player.svg";
+                                    if (model.type === "#") return "wall.svg";
+                                    if (model.type === "@") return "player.svg";
                                     if (model.type === "$") return "box.svg";
                                     if (model.type === ".") return "goal.svg";
                                     if (model.type === "*") return "box_on_goal.svg";
+                                    if (model.type === "+") return "player.svg";
                                     return "";
                                 }
                             }
@@ -235,27 +223,28 @@ ApplicationWindow {
                     }
                 }
             }
+
+            // Зум через колесо мышки для твоей Винды (не мешает скроллу на UT)
+            MouseArea {
+                anchors.fill: parent
+                propagateComposedEvents: true
+                onPressed: mouse.accepted = false
+                onWheel: {
+                    if (wheel.angleDelta.y > 0)
+                        gameContainer.scale = Math.min(3.0, gameContainer.scale + 0.1)
+                    else
+                        gameContainer.scale = Math.max(0.5, gameContainer.scale - 0.1)
+                }
+            }
         }
 
-        // --- БЛОК УПРАВЛЕНИЯ С АНИМАЦИЕЙ РЕЖИМОВ ---
+        // --- Блок управления (Кнопки и Swipe) ---
         Item {
-            id: controlRoot
-            width: 300; height: 250; anchors.horizontalCenter: parent.horizontalCenter
-
-            // 1. ТАЧПАД (SWIPE MODE)
+            id: controlRoot; width: 300; height: 220; anchors.horizontalCenter: parent.horizontalCenter
             Rectangle {
-                id: touchpad
-                anchors.fill: parent; color: "white"; radius: 20; border.color: "black"; border.width: 2
-
-                // АНИМАЦИЯ ПОЯВЛЕНИЯ
-                opacity: engine.swipeMode ? 0.15 : 0
-                scale: engine.swipeMode ? 1.0 : 0.8
-                visible: opacity > 0 // Для оптимизации рендеринга
-
-                // Плавное изменение opacity и scale
-                Behavior on opacity { OpacityAnimator { duration: 250 } }
-                Behavior on scale { ScaleAnimator { duration: 250; easing.type: Easing.OutBack } }
-
+                id: touchpad; anchors.fill: parent; color: "white"; radius: 20; border.color: "black"; border.width: 2
+                opacity: engine.swipeMode ? 0.2 : 0; visible: opacity > 0
+                Behavior on opacity { NumberAnimation { duration: 250 } }
                 MouseArea {
                     anchors.fill: parent; enabled: engine.swipeMode
                     property real startX: 0; property real startY: 0
@@ -265,39 +254,49 @@ ApplicationWindow {
                         if (Math.abs(dx) > 40) { engine.step(dx > 0 ? 1 : -1, 0); startX = mouse.x; startY = mouse.y }
                         else if (Math.abs(dy) > 40) { engine.step(0, dy > 0 ? 1 : -1); startX = mouse.x; startY = mouse.y }
                     }
-                    onPressAndHold: engine.swipeMode = false
+                    onDoubleClicked: engine.swipeMode = false
                 }
-                Text { anchors.centerIn: parent; text: qsTr("TOUCHPAD MODE\nPress and Hold to switch into Button Mode "); opacity: 0.5 }
+                Text { anchors.centerIn: parent; text: qsTr("SWIPE MODE\nDouble tap to exit"); opacity: 0.5; horizontalAlignment: Text.AlignHCenter }
             }
 
-            // 2. КНОПКИ (D-PAD MODE)
             Grid {
-                id: buttonGrid
                 columns: 3; anchors.centerIn: parent; spacing: 10
-
-                // АНИМАЦИЯ ИСЧЕЗНОВЕНИЯ
-                opacity: engine.swipeMode ? 0 : 1
-                scale: engine.swipeMode ? 0.8 : 1.0
-                visible: opacity > 0
-
-                // Те же Behavior для D-Pad кнопок
-                Behavior on opacity { OpacityAnimator { duration: 250 } }
-                Behavior on scale { ScaleAnimator { duration: 250; easing.type: Easing.OutBack } }
-
-                Item { width: 75; height: 75 }
-                Button { text: "↑"; width: 75; height: 75; onClicked: engine.step(0, -1); onPressAndHold: engine.swipeMode = true }
-                Item { width: 75; height: 75 }
-                Button { text: "←"; width: 75; height: 75; onClicked: engine.step(-1, 0); onPressAndHold: engine.swipeMode = true }
-                Button { text: "↓"; width: 75; height: 75; onClicked: engine.step(0, 1); onPressAndHold: engine.swipeMode = true }
-                Button { text: "→"; width: 75; height: 75; onClicked: engine.step(1, 0); onPressAndHold: engine.swipeMode = true }
+                opacity: engine.swipeMode ? 0 : 1; visible: opacity > 0
+                Behavior on opacity { NumberAnimation { duration: 250 } }
+                Item { width: 70; height: 70 }
+                Button { text: "↑"; width: 70; height: 70; onClicked: engine.step(0, -1); onPressAndHold: engine.swipeMode = true }
+                Item { width: 70; height: 70 }
+                Button { text: "←"; width: 70; height: 70; onClicked: engine.step(-1, 0); onPressAndHold: engine.swipeMode = true }
+                Button { text: "↓"; width: 70; height: 70; onClicked: engine.step(0, 1); onPressAndHold: engine.swipeMode = true }
+                Button { text: "→"; width: 70; height: 70; onClicked: engine.step(1, 0); onPressAndHold: engine.swipeMode = true }
             }
         }
     }
 
-    Text {
-        id: winLabel; text: qsTr("Win!"); visible: false; anchors.centerIn: parent
-        font.pixelSize: 60; color: "orange"; font.bold: true
+    Popup {
+        id: levelPicker; x: (parent.width - width) / 2; y: (parent.height - height) / 2
+        width: parent.width * 0.85; height: parent.height * 0.6; modal: true; focus: true
+        background: Rectangle { color: "#f9f9f9"; radius: 20; border.width: 3 }
+        Column {
+            anchors.fill: parent; anchors.margins: 20; spacing: 15
+            Text { text: qsTr("Select Level"); font.pixelSize: 22; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
+            GridView {
+                width: parent.width; height: parent.height - 120; cellWidth: 70; cellHeight: 70; clip: true
+                model: window.totalLevels
+                delegate: Button {
+                    width: 60; height: 60; text: (index + 1).toString(); enabled: index <= window.maxUnlockedLevel
+                    onClicked: { engine.loadLevel(index); levelPicker.close() }
+                }
+            }
+            Text {
+                text: qsTr("New levels will be appeared in the Second Part of Sokoban\nStay tunned!")
+                horizontalAlignment: Text.AlignHCenter
+                color: "red"
+            }
+        }
     }
+
+    Text { id: winLabel; text: qsTr("WIN!"); visible: false; anchors.centerIn: parent; font.pixelSize: 60; z: 10; color: "orange"; font.bold: true }
 
     Component.onCompleted: {
         dbManager.initDb();

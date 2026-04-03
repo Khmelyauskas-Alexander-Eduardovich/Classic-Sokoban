@@ -1,4 +1,7 @@
 {
-    "policy_groups": [],
+    "policy_groups": [
+    "networking",
+    "content_exchange"
+     ],
     "policy_version": 20.04
 }

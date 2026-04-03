@@ -1,9 +1,9 @@
-QT += qml svg gui core sql quick
+QT += qml quick svg sql network gui core quickcontrols2
 
 CONFIG += c++11
 
 # Оставляем ресурсы и исходники как есть
-RESOURCES += qml.qrc
+RESOURCES += qml/qml.qrc
 SOURCES += main.cpp
 
 # --- ПРАВИЛЬНЫЕ ПУТИ УСТАНОВКИ ---
@@ -11,6 +11,9 @@ SOURCES += main.cpp
 # 1. Забираем ВСЮ папку assets целиком (это надежнее, чем перечислять файлы)
 assets_data.files = assets/*
 assets_data.path = /assets
+
+assets_files.files = qml/*.svg
+assets_files.path = /qml
 
 # 2. Файлы QML
 qml_files.path = /qml
@@ -30,4 +33,4 @@ apparmor.files = sokoban-classic.apparmor
 target.path = /
 
 # --- ФИНАЛЬНЫЙ СПИСОК (БЕЗ ОПЕЧАТОК) ---
-INSTALLS += target desktop manifest apparmor assets_data qml_files
+INSTALLS += target desktop manifest apparmor assets_data qml_files assets_files

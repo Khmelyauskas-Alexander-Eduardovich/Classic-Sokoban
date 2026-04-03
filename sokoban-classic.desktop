@@ -1,7 +1,7 @@
 [Desktop Entry]
-Name=Sokoban
+Name=Sokoban %U
 Name[ru]=Сокобан
-Exec=%U Sokoban
+Exec=Sokoban
 Icon=assets/icon.svg
 X-Lomiri-Splash-Image=assets/splash.svg
 X-Lomiri-Departament-ID=games
